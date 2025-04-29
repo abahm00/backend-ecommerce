@@ -3,9 +3,7 @@ import { Cart } from "../../../database/models/cart.model.js";
 import { Order } from "../../../database/models/order.model.js";
 import { Product } from "../../../database/models/product.model.js";
 import { handleError } from "../../middlewares/catchError.js";
-const stripe = new Stripe(
-  "sk_test_51RInUV4Eq0pWwO01kvyz1eBFnIun5brV2MVyrb9kb63fnMZUYraYmSUVEQgTYa1Vl2spHZVRLcS1CqnNPxfqhbS300qJfZs0Sj"
-);
+const stripe = new Stripe();
 
 export const createCashOrder = handleError(async (req, res, next) => {
   let cart = await Cart.findById(req.params.id);
