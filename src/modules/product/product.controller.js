@@ -1,6 +1,7 @@
 import { handleError } from "./../../middlewares/catchError.js";
 import slugify from "slugify";
 import { Product } from "../../../database/models/product.model.js";
+import { Category } from "../../../database/models/category.model.js";
 
 export const addProduct = handleError(async (req, res, next) => {
   req.body.createdBy = req.user._id;
@@ -32,46 +33,69 @@ export const addProduct = handleError(async (req, res, next) => {
   res.json({ message: "Product added", product });
 });
 
-export const getAllProducts = handleError(async (req, res) => {
+export const getAllProducts = handleError(async (req, res, next) => {
   let pageNum = req.query.page * 1 || 1;
-  let limit = req.query.pageNum * 1 || 2;
+  let limit = req.query.pageNum * 1 || 10;
   if (pageNum < 1) pageNum = 1;
-
   const skip = (pageNum - 1) * limit;
 
   let filterObj = {};
 
   if (req.query.category) {
-    filterObj.category = req.query.category;
+    const category = await Category.findOne({ name: req.query.category });
+    if (!category) {
+      return next(new Error("Category not found"));
+    }
+    filterObj.category = category._id;
   }
 
   if (req.query.price) {
     const priceRange = req.query.price.split("-");
     if (priceRange.length === 2) {
-      const [minPrice, maxPrice] = priceRange.map(Number);
-      filterObj.price = { $gte: minPrice, $lte: maxPrice };
+      const minPrice = parseFloat(priceRange[0]);
+      const maxPrice = parseFloat(priceRange[1]);
+      if (!isNaN(minPrice) && !isNaN(maxPrice)) {
+        filterObj.price = { $gte: minPrice, $lte: maxPrice };
+      } else {
+        return next(new Error("Invalid price range"));
+      }
+    } else {
+      return next(new Error("Price range should be in the format 'min-max'"));
     }
   }
 
   if (req.query.rating) {
-    filterObj.rating = { $gte: req.query.rating * 1 };
+    filterObj.rateAvg = { $gte: parseFloat(req.query.rating) };
   }
 
-  let filterString = structuredClone(req.query);
-  filterString = JSON.stringify(filterString);
+  const excludedParams = [
+    "page",
+    "pageNum",
+    "sort",
+    "category",
+    "price",
+    "rating",
+  ];
+  const queryCopy = { ...req.query };
+  excludedParams.forEach((param) => delete queryCopy[param]);
+
+  let filterString = JSON.stringify(queryCopy);
   filterString = filterString.replace(
-    /(gt|gte|lt|lte)/g,
+    /\b(gt|gte|lt|lte)\b/g,
     (match) => `$${match}`
   );
-  filterObj = { ...filterObj, ...JSON.parse(filterString) };
+  const additionalFilters = JSON.parse(filterString);
+  filterObj = { ...filterObj, ...additionalFilters };
 
   let sortBy = req.query.sort
     ? req.query.sort.split(",").join(" ")
     : "-createdAt";
 
-  let mongoQuery = Product.find(filterObj).skip(skip).limit(limit).sort(sortBy);
-
-  let products = await mongoQuery;
+  let products = await Product.find(filterObj)
+    .skip(skip)
+    .limit(limit)
+    .sort(sortBy)
+    .populate("category", "name");
 
   const totalProducts = await Product.countDocuments(filterObj);
   const totalPages = Math.ceil(totalProducts / limit);
